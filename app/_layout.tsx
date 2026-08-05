@@ -18,18 +18,21 @@ export default function RootLayout() {
 
   return (
     <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-      <Stack initialRouteName="index">
-        {/* Tela Principal (Antigo Login) */}
-        <Stack.Screen name="index" options={{ headerShown: false }} />
+      <Stack screenOptions={{ headerShown: false }} initialRouteName="index">
+        {/* Tela Principal (Login) */}
+        <Stack.Screen name="index" />
+
+        {/* Tela Principal do App Logado */}
+        <Stack.Screen name="main" />
 
         {/* Tela de Cadastro */}
-        <Stack.Screen name="cadastro" options={{ headerShown: false }} />
+        <Stack.Screen name="cadastro" />
 
-        {/* Tela de Esqueci a Senha */}
-        <Stack.Screen name="forgot-password" options={{ headerShown: false }} />
+        {/* Tela de Solicitação de Recuperação de Senha */}
+        <Stack.Screen name="forgot-password" />
 
-        {/* Fluxo Principal de Abas (App Logado) */}
-        <Stack.Screen name="main" options={{ headerShown: false }} />
+        {/* Tela de Redefinição de Senha (link enviado por e-mail) */}
+        <Stack.Screen name="reset-password" />
 
         {/* Tela para rotas não encontradas */}
         <Stack.Screen name="+not-found" />

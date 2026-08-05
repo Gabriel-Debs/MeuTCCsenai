@@ -7,23 +7,23 @@ import { LinearGradient } from 'expo-linear-gradient';
 import React, { useEffect, useRef, useState } from 'react';
  
 import {
-  ActivityIndicator,
-  Alert,
-  Animated,
-  Dimensions,
-  Image,
-  LayoutAnimation,
-  Platform,
-  SafeAreaView,
-  ScrollView,
-  StatusBar,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
+    ActivityIndicator,
+    Alert,
+    Animated,
+    Dimensions,
+    Image,
+    LayoutAnimation,
+    Platform,
+    SafeAreaView,
+    ScrollView,
+    StatusBar,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View,
 } from 'react-native';
  
-const GEMINI_API_KEY = 'AQ.Ab8RN6K0lo99yPyixv12nVu7ElWySAskvcqHaVC2ndnZVp4JZQ';
+const GEMINI_API_KEY = 'AQ.Ab8RN6JtNDmdd227lgRcxTyMdiivqzcjefQbSEApnCb1dAtG8A';
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
  
 const THEME = {

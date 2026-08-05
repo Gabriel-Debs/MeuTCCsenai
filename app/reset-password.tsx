@@ -14,60 +14,62 @@ import {
   View,
 } from 'react-native';
 
-// Importação do client do Supabase
+// Import da instância do Supabase
 import { supabase } from '../lib/supabase';
 
-export default function ForgotPasswordScreen() {
+export default function ResetPasswordScreen() {
   const router = useRouter();
-  const [email, setEmail] = useState('');
+
+  const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [loading, setLoading] = useState(false);
 
-  // Helper para alertas em Web e Mobile
+  // Helper para alertas funcionarem na Web e no Celular
   const showAlert = (title: string, message: string, onPress?: () => void) => {
     if (Platform.OS === 'web') {
       window.alert(`${title}: ${message}`);
       if (onPress) onPress();
     } else {
-      Alert.alert(
-        title,
-        message,
-        onPress ? [{ text: 'OK', onPress }] : undefined
-      );
+      Alert.alert(title, message, onPress ? [{ text: 'OK', onPress }] : undefined);
     }
   };
 
-  const handleResetPassword = async () => {
-    // 1. Validações básicas[cite: 5]
-    if (!email.trim()) {
-      showAlert('Atenção', 'Digite seu e-mail.');
+  const handleUpdatePassword = async () => {
+    // 1. Validações locais
+    if (!password.trim()) {
+      showAlert('Atenção', 'Digite sua nova senha.');
       return;
     }
 
-    if (!email.includes('@')) {
-      showAlert('Atenção', 'Digite um e-mail válido.');
+    if (password.length < 6) {
+      showAlert('Atenção', 'A senha deve ter pelo menos 6 caracteres.');
+      return;
+    }
+
+    if (password !== confirmPassword) {
+      showAlert('Atenção', 'As senhas não coincidem.');
       return;
     }
 
     setLoading(true);
 
-    // 2. Envio do e-mail de redefinição com link de direcionamento
-    const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
-      redirectTo: 'http://localhost:8081/reset-password',
+    // 2. Atualização da senha no Supabase
+    const { error } = await supabase.auth.updateUser({
+      password: password,
     });
 
     setLoading(false);
 
-    // 3. Tratamento de Erro
     if (error) {
-      showAlert('Erro ao enviar', error.message);
+      showAlert('Erro', error.message);
       return;
     }
 
-    // 4. Sucesso[cite: 5]
+    // 3. Sucesso e redirecionamento para o login
     showAlert(
-      'Sucesso',
-      'Instruções para redefinição de senha foram enviadas para o seu e-mail.',
-      () => router.back()
+      'Senha alterada!',
+      'Sua senha foi redefinida com sucesso. Faça login com a nova senha.',
+      () => router.replace('/')
     );
   };
 
@@ -84,31 +86,43 @@ export default function ForgotPasswordScreen() {
 
         <View style={styles.card}>
           <View style={styles.headerContainer}>
-            <Text style={styles.icon}>🔑</Text>
+            <Text style={styles.icon}>🔒</Text>
 
-            <Text style={styles.title}>RECUPERAR ACESSO</Text>
+            <Text style={styles.title}>NOVA SENHA</Text>
 
             <Text style={styles.subtitle}>
-              Informe o e-mail cadastrado para receber as instruções de redefinição de senha.
+              Crie uma nova senha para acessar sua conta no Desburocrata.
             </Text>
           </View>
 
           <View style={styles.inputContainer}>
-            <Text style={styles.label}>E-mail</Text>
+            <Text style={styles.label}>Nova Senha</Text>
             <TextInput
               style={styles.input}
-              placeholder="seu@email.com"
+              placeholder="Digite a nova senha"
               placeholderTextColor="#64748B"
-              keyboardType="email-address"
-              autoCapitalize="none"
-              value={email}
-              onChangeText={setEmail}
+              secureTextEntry
+              value={password}
+              onChangeText={setPassword}
+              editable={!loading}
+            />
+          </View>
+
+          <View style={styles.inputContainer}>
+            <Text style={styles.label}>Confirmar Senha</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="Repita a nova senha"
+              placeholderTextColor="#64748B"
+              secureTextEntry
+              value={confirmPassword}
+              onChangeText={setConfirmPassword}
               editable={!loading}
             />
           </View>
 
           <Pressable
-            onPress={handleResetPassword}
+            onPress={handleUpdatePassword}
             disabled={loading}
             style={({ pressed, hovered }) => [
               styles.button,
@@ -126,16 +140,16 @@ export default function ForgotPasswordScreen() {
             {loading ? (
               <ActivityIndicator color="#FFFFFF" />
             ) : (
-              <Text style={styles.buttonText}>Enviar Instruções</Text>
+              <Text style={styles.buttonText}>Redefinir Senha</Text>
             )}
           </Pressable>
 
           <TouchableOpacity
             style={styles.backButton}
-            onPress={() => router.back()}
+            onPress={() => router.replace('/')}
             disabled={loading}
           >
-            <Text style={styles.backButtonText}>← Voltar para o Login</Text>
+            <Text style={styles.backButtonText}>← Cancelar e Ir ao Login</Text>
           </TouchableOpacity>
         </View>
       </KeyboardAvoidingView>
