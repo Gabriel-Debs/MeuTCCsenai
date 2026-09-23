@@ -33,6 +33,6 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
     storage: CustomAsyncStorage,
     autoRefreshToken: true,
     persistSession: true,
-    detectSessionInUrl: false,
+    detectSessionInUrl: true,
   },
 });
