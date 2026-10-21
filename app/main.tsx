@@ -4,7 +4,9 @@ import * as FileSystem from 'expo-file-system/legacy';
 import * as Haptics from 'expo-haptics';
 import * as ImagePicker from 'expo-image-picker';
 import { LinearGradient } from 'expo-linear-gradient';
-import React, { useEffect, useRef, useState } from 'react';
+import * as Print from 'expo-print';
+import * as Sharing from 'expo-sharing';
+import { useEffect, useRef, useState } from 'react';
  
 import {
   ActivityIndicator,
@@ -22,8 +24,9 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
- 
-const GEMINI_API_KEY = 'AQ.Ab8RN6J2u-f2x-L6GCYu_EU0vAEjEJB8PaVR3pZVzESYh75Itg';
+
+const GEMINI_MODELS = ['gemini-3.6-flash', 'gemini-3.5-flash']; // principal, reserva
+const GEMINI_API_KEY = 'AQ.Ab8RN6IyiEJQMlyu8AYb2quM2ol4_sGow-8hP2C5oizMKJsvxQ'.trim();
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
  
 const THEME = {
@@ -231,30 +234,159 @@ function LoadingDots() {
 }
  
 // ─── Helpers ──────────────────────────────────────────────────
-const MAX_FILE_MB = 15; // limite prático para enviar inline ao Gemini (~20 MB no total)
+const MAX_FILE_MB = 15; // limite por arquivo
+const MAX_TOTAL_MB = 18; // limite prático para enviar inline ao Gemini (~20 MB no total da requisição)
+const MAX_FILES = 10; // máximo de arquivos por análise
 
-async function uriToBase64(uri: string): Promise<string> {
-  if (Platform.OS === 'web') {
-    const blob = await (await fetch(uri)).blob();
-    return await new Promise<string>((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(String(reader.result).split(',')[1] ?? '');
-      reader.onerror = () => reject(reader.error);
-      reader.readAsDataURL(blob);
-    });
-  }
-  return await FileSystem.readAsStringAsync(uri, {
-    encoding: FileSystem.EncodingType.Base64,
+async function blobUriToBase64(uri: string): Promise<string> {
+  const blob = await (await fetch(uri)).blob();
+  return await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result).split(',')[1] ?? '');
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(blob);
   });
+}
+
+// Lê um arquivo como base64 tentando vários métodos (o Android às vezes recusa o primeiro)
+async function uriToBase64(uri: string): Promise<string> {
+  if (Platform.OS === 'web') return blobUriToBase64(uri);
+
+  const errors: string[] = [];
+
+  // 1) API legada
+  try {
+    return await FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.Base64 });
+  } catch (e: any) {
+    errors.push(`legacy: ${e?.message}`);
+  }
+
+  // 2) API nova do expo-file-system (SDK 54+)
+  try {
+    const { File } = require('expo-file-system');
+    return await new File(uri).base64();
+  } catch (e: any) {
+    errors.push(`File: ${e?.message}`);
+  }
+
+  // 3) Copia para o cache do app e tenta ler de novo
+  try {
+    const copy = `${FileSystem.cacheDirectory}upload-${Date.now()}`;
+    await FileSystem.copyAsync({ from: uri, to: copy });
+    return await FileSystem.readAsStringAsync(copy, { encoding: FileSystem.EncodingType.Base64 });
+  } catch (e: any) {
+    errors.push(`copy: ${e?.message}`);
+  }
+
+  // 4) fetch + FileReader
+  try {
+    return await blobUriToBase64(uri);
+  } catch (e: any) {
+    errors.push(`fetch: ${e?.message}`);
+  }
+
+  throw new Error(`Não foi possível ler o arquivo.\n${errors.join('\n')}`);
+}
+
+// ─── PDF do relatório ─────────────────────────────────────────
+const escapeHtml = (str: string) =>
+  str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+
+// Converte o texto da IA (com possíveis **negritos** e listas "* item" / "- item") em HTML seguro
+function textToHtml(text: string): string {
+  const lines = escapeHtml(text).split(/\r?\n/);
+  let html = '';
+  let inList = false;
+
+  for (const raw of lines) {
+    const line = raw.trim();
+    const bullet = line.match(/^[*\-•]\s+(.*)$/);
+    const formatted = (bullet ? bullet[1] : line).replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+
+    if (bullet) {
+      if (!inList) { html += '<ul>'; inList = true; }
+      html += `<li>${formatted}</li>`;
+    } else {
+      if (inList) { html += '</ul>'; inList = false; }
+      if (line) html += `<p>${formatted}</p>`;
+    }
+  }
+  if (inList) html += '</ul>';
+  return html;
+}
+
+function buildReportHtml(opts: {
+  summary: string;
+  attention: string;
+  nextStep: string;
+  fileNames: string[];
+}): string {
+  const { summary, attention, nextStep, fileNames } = opts;
+  const date = new Date().toLocaleDateString('pt-BR', {
+    day: '2-digit',
+    month: 'long',
+    year: 'numeric',
+  });
+
+  const section = (title: string, color: string, text: string) =>
+    text
+      ? `<div class="card" style="border-left-color:${color}">
+           <h2 style="color:${color}">${title}</h2>
+           ${textToHtml(text)}
+         </div>`
+      : '';
+
+  return `<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <style>
+    @page { margin: 28px; }
+    * { box-sizing: border-box; }
+    body { font-family: -apple-system, 'Helvetica Neue', Arial, sans-serif; color: #1A1A2E; margin: 0; padding: 8px; }
+    .header { display: flex; align-items: center; justify-content: space-between; border-bottom: 2px solid ${THEME.primary}; padding-bottom: 12px; margin-bottom: 18px; }
+    .brand { font-size: 22px; font-weight: 700; }
+    .brand span { color: ${THEME.accent}; }
+    .date { font-size: 12px; color: #6B6B80; }
+    .badge { display: inline-block; font-size: 11px; font-weight: 700; letter-spacing: 1px; color: ${THEME.primary}; background: #EFEDFE; border-radius: 20px; padding: 4px 12px; margin-bottom: 14px; }
+    .files { font-size: 12px; color: #6B6B80; margin-bottom: 18px; }
+    .card { border: 1px solid #E5E5EE; border-left: 5px solid; border-radius: 12px; padding: 14px 18px; margin-bottom: 16px; page-break-inside: avoid; }
+    .card h2 { font-size: 15px; margin: 0 0 8px 0; text-transform: uppercase; letter-spacing: 0.8px; }
+    .card p, .card li { font-size: 14px; line-height: 1.6; margin: 0 0 8px 0; }
+    .card ul { margin: 0 0 8px 0; padding-left: 20px; }
+    .footer { margin-top: 24px; font-size: 11px; color: #9A9AAE; text-align: center; border-top: 1px solid #E5E5EE; padding-top: 10px; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="brand">Desburocrata<span>.</span></div>
+    <div class="date">${escapeHtml(date)}</div>
+  </div>
+  <div class="badge">ANÁLISE CONCLUÍDA</div>
+  ${fileNames.length ? `<div class="files">Documento(s) analisado(s): ${escapeHtml(fileNames.join(', '))}</div>` : ''}
+  ${section('Resumo', THEME.primary, summary)}
+  ${section('Atenção', THEME.danger, attention)}
+  ${section('Próximo Passo', '#16A34A', nextStep)}
+  <div class="footer">Relatório gerado por IA. Confira as informações importantes no documento original.</div>
+</body>
+</html>`;
 }
 
 // ─── Main App ─────────────────────────────────────────────────
 export default function App() {
-  const [selectedFile, setSelectedFile] = useState<FileType | null>(null);
+  const [selectedFiles, setSelectedFiles] = useState<FileType[]>([]);
+  const [currentIndex, setCurrentIndex] = useState(0);
+  const [pageWidth, setPageWidth] = useState(0);
   const [loading, setLoading] = useState(false);
   const [summary, setSummary] = useState('');
   const [attention, setAttention] = useState('');
   const [nextStep, setNextStep] = useState('');
+  const [exportingPdf, setExportingPdf] = useState(false);
  
   const headerOpacity = useRef(new Animated.Value(0)).current;
   const headerY = useRef(new Animated.Value(-12)).current;
@@ -266,9 +398,31 @@ export default function App() {
     ]).start();
   }, []);
  
-  useEffect(() => {
-    if (selectedFile) analyzeFile();
-  }, [selectedFile]);
+  // Adiciona arquivos à lista (sem analisar automaticamente, para o usuário poder juntar várias imagens)
+  const addFiles = (newFiles: FileType[]) => {
+    if (!newFiles.length) return;
+    const current = selectedFiles;
+    const combined = [...current, ...newFiles];
+
+    if (combined.length > MAX_FILES) {
+      return Alert.alert('Muitos arquivos', `Você pode analisar até ${MAX_FILES} arquivos por vez.`);
+    }
+    const totalBytes = combined.reduce((sum, f) => sum + (f.base64.length * 3) / 4, 0);
+    if (totalBytes > MAX_TOTAL_MB * 1024 * 1024) {
+      return Alert.alert('Arquivos grandes demais', `O total precisa ficar abaixo de ${MAX_TOTAL_MB} MB.`);
+    }
+
+    toggleAnimation();
+    setSelectedFiles(combined);
+    resetResult();
+  };
+
+  const removeFileAt = (index: number) => {
+    toggleAnimation();
+    setSelectedFiles((prev) => prev.filter((_, i) => i !== index));
+    resetResult();
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+  };
  
   const toggleAnimation = () => {
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
@@ -296,7 +450,9 @@ export default function App() {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],
-      allowsEditing: false, 
+      allowsEditing: false,
+      allowsMultipleSelection: true,
+      selectionLimit: MAX_FILES,
       quality: 0.9,
       base64: true,
     });
@@ -308,26 +464,29 @@ export default function App() {
       const result = await DocumentPicker.getDocumentAsync({
         type: ['application/pdf', 'image/*'],
         copyToCacheDirectory: true,
+        multiple: true,
       });
       if (result.canceled || !result.assets?.length) return;
-      const file = result.assets[0];
 
-      if (file.size && file.size > MAX_FILE_MB * 1024 * 1024) {
-        return Alert.alert('Arquivo grande demais', `Escolha um arquivo de até ${MAX_FILE_MB} MB.`);
+      const tooBig = result.assets.find((f) => f.size && f.size > MAX_FILE_MB * 1024 * 1024);
+      if (tooBig) {
+        return Alert.alert('Arquivo grande demais', `"${tooBig.name}" passa de ${MAX_FILE_MB} MB.`);
       }
 
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-      const base64 = await uriToBase64(file.uri);
-      const mimeType = file.mimeType || 'application/pdf';
-      toggleAnimation();
-      setSelectedFile({
-        uri: file.uri,
-        base64,
-        mimeType,
-        name: file.name,
-        isImage: mimeType.startsWith('image/'),
-      });
-      resetResult();
+      const files: FileType[] = await Promise.all(
+        result.assets.map(async (file) => {
+          const mimeType = file.mimeType || 'application/pdf';
+          return {
+            uri: file.uri,
+            base64: await uriToBase64(file.uri),
+            mimeType,
+            name: file.name,
+            isImage: mimeType.startsWith('image/'),
+          };
+        })
+      );
+      addFiles(files);
     } catch (e: any) {
       console.error('pickDocument error:', e);
       Alert.alert('Erro', `Não foi possível selecionar o documento.\n\n${e?.message ?? ''}`);
@@ -337,18 +496,17 @@ export default function App() {
   const processFileResult = async (result: any, isImage: boolean) => {
     if (result.canceled || !result.assets?.length) return;
     try {
-      const asset = result.assets[0];
-      const base64 = asset.base64 || (await uriToBase64(asset.uri));
-      toggleAnimation();
-      setSelectedFile({
-        uri: asset.uri,
-        base64,
-        mimeType: asset.mimeType || (isImage ? 'image/jpeg' : 'application/pdf'),
-        name: isImage ? 'documento.jpg' : asset.name || 'arquivo',
-        isImage,
-        aspectRatio: asset.width && asset.height ? asset.width / asset.height : undefined,
-      });
-      resetResult();
+      const files: FileType[] = await Promise.all(
+        result.assets.map(async (asset: any, i: number) => ({
+          uri: asset.uri,
+          base64: asset.base64 || (await uriToBase64(asset.uri)),
+          mimeType: asset.mimeType || (isImage ? 'image/jpeg' : 'application/pdf'),
+          name: isImage ? `documento-${selectedFiles.length + i + 1}.jpg` : asset.name || 'arquivo',
+          isImage,
+          aspectRatio: asset.width && asset.height ? asset.width / asset.height : undefined,
+        }))
+      );
+      addFiles(files);
     } catch (e: any) {
       console.error('processFileResult error:', e);
       Alert.alert('Erro', `Não foi possível carregar a imagem.\n\n${e?.message ?? ''}`);
@@ -356,48 +514,82 @@ export default function App() {
   };
 
   const analyzeFile = async () => {
-    if (!selectedFile) return;
+    if (!selectedFiles.length) return;
+    resetResult();
     setLoading(true);
     try {
-      const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [
+      const multi = selectedFiles.length > 1;
+      const body = JSON.stringify({
+        contents: [
+          {
+            parts: [
               {
-                parts: [
-                  {
-                    text: `
-Explique o documento como se estivesse falando com uma pessoa comum.
+                text: `
+Explique ${multi ? 'os documentos enviados (podem ser páginas do mesmo documento ou documentos diferentes; analise tudo em conjunto e deixe claro quando algo vier de um documento específico)' : 'o documento'} como se estivesse falando com uma pessoa comum.
 Use linguagem simples, direta e curta.
- 
+
 Responda exatamente nesse formato:
- 
+
 RESUMO:
 ...
- 
+
 ATENÇÃO:
 ...
- 
+
 PRÓXIMO PASSO:
 ...
-                    `,
-                  },
-                  {
-                    inline_data: {
-                      mime_type: selectedFile.mimeType,
-                      data: selectedFile.base64,
-                    },
-                  },
-                ],
+                `,
               },
+              ...selectedFiles.map((f) => ({
+                inline_data: {
+                  mime_type: f.mimeType,
+                  data: f.base64,
+                },
+              })),
             ],
-          }),
+          },
+        ],
+      });
+
+      let response: Response | null = null;
+      let data: any = null;
+      let lastNetworkError = '';
+
+      outer: for (const model of GEMINI_MODELS) {
+        for (let attempt = 0; attempt < 3; attempt++) {
+          const controller = new AbortController();
+          const timer = setTimeout(() => controller.abort(), 45000); // limite de 45s por tentativa
+          try {
+            console.log(`[Gemini] ${model} - tentativa ${attempt + 1}`);
+            response = await fetch(
+              `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`,
+              {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body,
+                signal: controller.signal,
+              }
+            );
+            data = await response.json();
+            console.log(`[Gemini] ${model} respondeu com status ${response.status}`);
+          } catch (err: any) {
+            response = null;
+            lastNetworkError = err?.name === 'AbortError' ? 'A IA demorou demais para responder.' : (err?.message ?? 'Falha de rede.');
+            console.warn(`[Gemini] ${model} falhou:`, lastNetworkError);
+          } finally {
+            clearTimeout(timer);
+          }
+
+          if (response?.ok) break outer; // deu certo
+          if (response && response.status !== 503 && response.status !== 429) break outer; // erro que não adianta repetir
+          await new Promise((r) => setTimeout(r, 1500 * (attempt + 1))); // espera 1.5s, 3s, 4.5s
         }
-      );
-      const data = await response.json();
+      }
+
+      if (!response) {
+        Alert.alert('Erro', `${lastNetworkError || 'Não foi possível falar com a IA.'}\n\nTente novamente em instantes.`);
+        return;
+      }
       if (!response.ok) {
         console.error('Gemini error:', response.status, data);
         Alert.alert('Erro na IA', `(${response.status}) ${data?.error?.message ?? 'Falha ao analisar o documento.'}`);
@@ -436,11 +628,60 @@ PRÓXIMO PASSO:
  
   const removeSelectedFile = () => {
     toggleAnimation();
-    setSelectedFile(null);
+    setSelectedFiles([]);
     resetResult();
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
   };
  
+  const downloadPdf = async () => {
+    if (exportingPdf) return;
+    setExportingPdf(true);
+    try {
+      const html = buildReportHtml({
+        summary,
+        attention,
+        nextStep,
+        fileNames: selectedFiles.map((f) => f.name),
+      });
+
+      // Web: abre a janela de impressão, onde o usuário escolhe "Salvar como PDF"
+      if (Platform.OS === 'web') {
+        await Print.printAsync({ html });
+        return;
+      }
+
+      // Celular: gera o arquivo PDF e abre o menu de compartilhar/salvar
+      const { uri } = await Print.printToFileAsync({ html, base64: false });
+
+      // Dá um nome amigável ao arquivo
+      const stamp = new Date().toISOString().slice(0, 10);
+      const target = `${FileSystem.cacheDirectory}Desburocrata-relatorio-${stamp}.pdf`;
+      let finalUri = uri;
+      try {
+        await FileSystem.deleteAsync(target, { idempotent: true });
+        await FileSystem.moveAsync({ from: uri, to: target });
+        finalUri = target;
+      } catch {
+        // se renomear falhar, usa o arquivo original mesmo
+      }
+
+      if (!(await Sharing.isAvailableAsync())) {
+        return Alert.alert('PDF gerado', `Arquivo salvo em:\n${finalUri}`);
+      }
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      await Sharing.shareAsync(finalUri, {
+        mimeType: 'application/pdf',
+        UTI: 'com.adobe.pdf',
+        dialogTitle: 'Salvar ou compartilhar relatório',
+      });
+    } catch (e: any) {
+      console.error('downloadPdf error:', e);
+      Alert.alert('Erro', `Não foi possível gerar o PDF.\n\n${e?.message ?? ''}`);
+    } finally {
+      setExportingPdf(false);
+    }
+  };
+
   const hasResult = Boolean(summary || attention || nextStep);
  
   return (
@@ -466,46 +707,64 @@ PRÓXIMO PASSO:
           <View style={styles.viewfinderTouchable}>
             
             <View style={styles.previewContent}>
-              {selectedFile ? (
-                <>
-                  {selectedFile.isImage ? (
-                    <View style={[
-                      styles.imageWrapper, 
-                      selectedFile.aspectRatio ? { aspectRatio: selectedFile.aspectRatio } : null
-                    ]}>
-                      <Image source={{ uri: selectedFile.uri }} style={styles.image} />
-                      <LinearGradient colors={['transparent', 'rgba(7,7,16,0.7)']} style={styles.imageOverlay} />
-
-<View style={[styles.corner, styles.cornerTL]} />
-<View style={[styles.corner, styles.cornerTR]} />
-<View style={[styles.corner, styles.cornerBL]} />
-<View style={[styles.corner, styles.cornerBR]} />
- 
-                      <View style={styles.imageInfo}>
-                        <View style={styles.capturedBadge}>
-                          <View style={styles.capturedDot} />
-                          <Text style={styles.capturedBadgeText}>Capturado</Text>
+              {selectedFiles.length > 0 ? (
+                <ScrollView
+                  horizontal
+                  pagingEnabled
+                  showsHorizontalScrollIndicator={false}
+                  style={{ width: '100%' }}
+                  onLayout={(e) => setPageWidth(e.nativeEvent.layout.width)}
+                  onMomentumScrollEnd={(e) =>
+                    pageWidth && setCurrentIndex(Math.round(e.nativeEvent.contentOffset.x / pageWidth))
+                  }
+                >
+                  {selectedFiles.map((file, index) => (
+                    <View key={`${file.uri}-${index}`} style={[styles.page, pageWidth ? { width: pageWidth } : null]}>
+                      {file.isImage ? (
+                        <View style={styles.imageWrapper}>
+                          <Image source={{ uri: file.uri }} style={styles.image} />
+                          <LinearGradient colors={['transparent', 'rgba(7,7,16,0.7)']} style={styles.imageOverlay} />
+                          <View style={[styles.corner, styles.cornerTL]} />
+                          <View style={[styles.corner, styles.cornerTR]} />
+                          <View style={[styles.corner, styles.cornerBL]} />
+                          <View style={[styles.corner, styles.cornerBR]} />
+                          <View style={styles.imageInfo}>
+                            <View style={styles.capturedBadge}>
+                              <View style={styles.capturedDot} />
+                              <Text style={styles.capturedBadgeText}>Capturado</Text>
+                            </View>
+                            <Text style={styles.imageInfoTitle}>
+                              {selectedFiles.length > 1 ? `Imagem ${index + 1}` : 'Documento pronto'}
+                            </Text>
+                            <Text style={styles.imageInfoSub}>
+                              {loading ? 'Analisando com IA…' : hasResult ? 'Análise concluída' : 'Pronto para analisar'}
+                            </Text>
+                          </View>
                         </View>
-                        <Text style={styles.imageInfoTitle}>Documento pronto</Text>
-                        <Text style={styles.imageInfoSub}>
-                          {loading ? 'Analisando com IA…' : 'Análise concluída'}
-                        </Text>
-                      </View>
+                      ) : (
+                        <LinearGradient colors={[THEME.surface, THEME.card]} style={styles.documentPreview}>
+                          <View style={styles.documentIconWrap}>
+                            <Ionicons name="document-text" size={52} color={THEME.accent} />
+                          </View>
+                          <Text style={styles.fileName} numberOfLines={2}>{file.name}</Text>
+                          <View style={styles.fileTypePill}>
+                            <Text style={styles.fileTypePillText}>
+                              {file.name.split('.').pop()?.toUpperCase() ?? 'DOC'}
+                            </Text>
+                          </View>
+                        </LinearGradient>
+                      )}
+
+                      <TouchableOpacity
+                        style={styles.removeOneButton}
+                        onPress={() => removeFileAt(index)}
+                        activeOpacity={0.7}
+                      >
+                        <Ionicons name="trash-outline" size={16} color="#fff" />
+                      </TouchableOpacity>
                     </View>
-                  ) : (
-                    <LinearGradient colors={[THEME.surface, THEME.card]} style={styles.documentPreview}>
-                      <View style={styles.documentIconWrap}>
-                        <Ionicons name="document-text" size={52} color={THEME.accent} />
-                      </View>
-                      <Text style={styles.fileName} numberOfLines={2}>{selectedFile.name}</Text>
-                      <View style={styles.fileTypePill}>
-                        <Text style={styles.fileTypePillText}>
-                          {selectedFile.name.split('.').pop()?.toUpperCase() ?? 'DOC'}
-                        </Text>
-                      </View>
-                    </LinearGradient>
-                  )}
-                </>
+                  ))}
+                </ScrollView>
               ) : (
                 <View style={styles.emptyState}>
                   <View style={styles.scannerFrameOuter}>
@@ -523,10 +782,19 @@ PRÓXIMO PASSO:
             </View>
 
             {/* Botão de Fechar flutuante */}
-            {selectedFile && (
-              <TouchableOpacity style={styles.closeFileButton} onPress={removeSelectedFile} activeOpacity={0.7}>
-                <Ionicons name="close" size={20} color="#fff" />
-              </TouchableOpacity>
+            {selectedFiles.length > 0 && (
+              <>
+                <TouchableOpacity style={styles.closeFileButton} onPress={removeSelectedFile} activeOpacity={0.7}>
+                  <Ionicons name="close" size={20} color="#fff" />
+                </TouchableOpacity>
+                {selectedFiles.length > 1 && (
+                  <View style={styles.counterBadge}>
+                    <Text style={styles.counterBadgeText}>
+                      {Math.min(currentIndex + 1, selectedFiles.length)}/{selectedFiles.length}
+                    </Text>
+                  </View>
+                )}
+              </>
             )}
  
             {/* ── Barra de Ações Inferior Fixa ── */}
@@ -553,6 +821,28 @@ PRÓXIMO PASSO:
           </View>
         </View>
  
+        {/* ── Botão Analisar ── */}
+        {selectedFiles.length > 0 && !loading && !hasResult && (
+          <TouchableOpacity style={styles.analyzeButton} onPress={analyzeFile} activeOpacity={0.85}>
+            <LinearGradient
+              colors={[THEME.accent, '#00B89C']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 0 }}
+              style={styles.resetGradient}
+            >
+              <Ionicons name="sparkles-outline" size={20} color="#070710" />
+              <Text style={[styles.resetButtonText, { color: '#070710' }]}>
+                {selectedFiles.length > 1 ? `Analisar ${selectedFiles.length} arquivos` : 'Analisar documento'}
+              </Text>
+            </LinearGradient>
+          </TouchableOpacity>
+        )}
+        {selectedFiles.length > 0 && !loading && !hasResult && (
+          <Text style={styles.addMoreHint}>
+            Dica: toque em Galeria, Câmera ou Arquivo para adicionar mais imagens antes de analisar.
+          </Text>
+        )}
+
         {/* ── Loading ── */}
         {loading && (
           <View style={styles.loadingContainer}>
@@ -600,6 +890,29 @@ PRÓXIMO PASSO:
               delay={200}
             />
  
+            <TouchableOpacity
+              style={[styles.resetButton, exportingPdf && { opacity: 0.6 }]}
+              onPress={downloadPdf}
+              disabled={exportingPdf}
+              activeOpacity={0.85}
+            >
+              <LinearGradient
+                colors={[THEME.accent, '#00B89C']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 0 }}
+                style={styles.resetGradient}
+              >
+                {exportingPdf ? (
+                  <ActivityIndicator size="small" color="#070710" />
+                ) : (
+                  <Ionicons name="download-outline" size={20} color="#070710" />
+                )}
+                <Text style={[styles.resetButtonText, { color: '#070710' }]}>
+                  {exportingPdf ? 'Gerando PDF…' : 'Baixar relatório em PDF'}
+                </Text>
+              </LinearGradient>
+            </TouchableOpacity>
+
             <TouchableOpacity style={styles.resetButton} onPress={removeSelectedFile} activeOpacity={0.85}>
               <LinearGradient
                 colors={[THEME.primary, '#5046E8']}
@@ -729,6 +1042,51 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     borderWidth: 0.5,
     borderColor: 'rgba(255,255,255,0.2)',
+  },
+  page: {
+    height: '100%',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  removeOneButton: {
+    position: 'absolute',
+    top: 20,
+    left: 20,
+    zIndex: 10,
+    backgroundColor: 'rgba(255,90,122,0.55)',
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  counterBadge: {
+    position: 'absolute',
+    top: 26,
+    alignSelf: 'center',
+    zIndex: 10,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    borderRadius: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderWidth: 0.5,
+    borderColor: 'rgba(255,255,255,0.2)',
+  },
+  counterBadgeText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  analyzeButton: {
+    borderRadius: 16,
+    overflow: 'hidden',
+    marginTop: 16,
+  },
+  addMoreHint: {
+    marginTop: 10,
+    fontSize: 12,
+    color: THEME.textMuted,
+    textAlign: 'center',
   },
   imageWrapper: {
     width: '100%',
