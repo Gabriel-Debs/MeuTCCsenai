@@ -1,3 +1,5 @@
+import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import React, { useState } from 'react';
 import {
@@ -14,8 +16,20 @@ import {
   View,
 } from 'react-native';
 
-// Importação do seu client Supabase (ajuste o caminho se necessário)
 import { supabase } from '../lib/supabase';
+
+const THEME = {
+  bg: '#070710',
+  card: '#12121F',
+  primary: '#7B6EF6',
+  primaryDark: '#5B4FE8',
+  accent: '#00E5C3',
+  text: '#F1F1F6',
+  textSoft: '#C0C0D0',
+  textMuted: '#6B6B80',
+  border: 'rgba(255,255,255,0.08)',
+  inputBg: '#090911',
+};
 
 export default function LoginScreen() {
   const router = useRouter();
@@ -24,7 +38,6 @@ export default function LoginScreen() {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
 
-  // Helper para os alertas funcionarem corretamente no Navegador Web e no App Mobile
   const showAlert = (title: string, message: string) => {
     if (Platform.OS === 'web') {
       window.alert(`${title}: ${message}`);
@@ -34,48 +47,28 @@ export default function LoginScreen() {
   };
 
   const handleLogin = async () => {
-    // 1. Validações locais dos campos
-    if (!email.trim()) {
-      showAlert('Atenção', 'Digite seu e-mail.');
-      return;
-    }
+    if (!email.trim()) return showAlert('Atenção', 'Digite seu e-mail.');
+    if (!email.includes('@')) return showAlert('Atenção', 'Digite um e-mail válido.');
+    if (!password.trim()) return showAlert('Atenção', 'Digite sua senha.');
 
-    if (!email.includes('@')) {
-      showAlert('Atenção', 'Digite um e-mail válido.');
-      return;
-    }
-
-    if (!password.trim()) {
-      showAlert('Atenção', 'Digite sua senha.');
-      return;
-    }
-
-    // 2. Autenticação com o Supabase
     setLoading(true);
-
     const { data, error } = await supabase.auth.signInWithPassword({
       email: email.trim(),
-      password: password,
+      password,
     });
-
     setLoading(false);
 
-    // 3. Validação de erro (Usuário inexistente ou senha errada)
     if (error) {
       if (error.message.includes('Invalid login credentials')) {
         showAlert('Erro ao entrar', 'E-mail ou senha incorretos.');
       } else if (error.message.includes('Email not confirmed')) {
-        showAlert(
-          'E-mail não confirmado',
-          'Confirme seu e-mail de cadastro antes de realizar o login.'
-        );
+        showAlert('E-mail não confirmado', 'Confirme seu e-mail de cadastro antes de realizar o login.');
       } else {
         showAlert('Erro no login', error.message);
       }
       return;
     }
 
-    // 4. Sucesso -> Direciona o usuário autenticado para as rotas protegidas
     if (data.session) {
       router.replace('/main');
     }
@@ -86,27 +79,21 @@ export default function LoginScreen() {
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       style={styles.container}
     >
-      <StatusBar
-        barStyle="light-content"
-        backgroundColor="#020617"
-      />
+      <StatusBar barStyle="light-content" backgroundColor={THEME.bg} />
 
-      <View style={styles.topBackground} />
+      <View style={styles.ambientGlow} />
 
       <View style={styles.loginCard}>
         <View style={styles.logoContainer}>
-          <Text style={styles.logoIcon}>💼</Text>
+          <View style={styles.iconBadge}>
+            <Ionicons name="briefcase-outline" size={32} color={THEME.accent} />
+          </View>
 
-          <Text style={styles.brandName}>
-            DESBUROCRATA
-          </Text>
+          <Text style={styles.brandName}>DESBUROCRATA</Text>
 
           <View style={styles.statusContainer}>
             <View style={styles.statusDot} />
-
-            <Text style={styles.statusText}>
-              Sistema Online
-            </Text>
+            <Text style={styles.statusText}>Sistema Online</Text>
           </View>
 
           <Text style={styles.subtitle}>
@@ -115,14 +102,11 @@ export default function LoginScreen() {
         </View>
 
         <View style={styles.inputContainer}>
-          <Text style={styles.label}>
-            E-mail
-          </Text>
-
+          <Text style={styles.label}>E-mail</Text>
           <TextInput
             style={styles.input}
-            placeholder="seu@email.com"
-            placeholderTextColor="#64748B"
+            placeholder="Digite seu email"
+            placeholderTextColor={THEME.textMuted}
             keyboardType="email-address"
             autoCapitalize="none"
             autoCorrect={false}
@@ -133,14 +117,11 @@ export default function LoginScreen() {
         </View>
 
         <View style={styles.inputContainer}>
-          <Text style={styles.label}>
-            Senha
-          </Text>
-
+          <Text style={styles.label}>Senha</Text>
           <TextInput
             style={styles.input}
             placeholder="Digite sua senha"
-            placeholderTextColor="#64748B"
+            placeholderTextColor={THEME.textMuted}
             secureTextEntry
             value={password}
             onChangeText={setPassword}
@@ -148,21 +129,19 @@ export default function LoginScreen() {
           />
         </View>
 
-        <Pressable
-          onPress={handleLogin}
-          disabled={loading}
-          style={({ pressed }) => [
-            styles.button,
-            (pressed || loading) && styles.buttonPressed,
-          ]}
-        >
-          {loading ? (
-            <ActivityIndicator color="#FFFFFF" />
-          ) : (
-            <Text style={styles.buttonText}>
-              Entrar na Plataforma
-            </Text>
-          )}
+        <Pressable onPress={handleLogin} disabled={loading} style={styles.buttonWrapper}>
+          <LinearGradient
+            colors={[THEME.primary, THEME.primaryDark]}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 0 }}
+            style={styles.buttonGradient}
+          >
+            {loading ? (
+              <ActivityIndicator color="#FFFFFF" />
+            ) : (
+              <Text style={styles.buttonText}>Entrar na Plataforma</Text>
+            )}
+          </LinearGradient>
         </Pressable>
 
         <View style={styles.footerLinks}>
@@ -171,23 +150,17 @@ export default function LoginScreen() {
             onPress={() => router.push('/cadastro')}
             disabled={loading}
           >
-            <Text style={styles.linkTextPrimary}>
-              Criar Conta
-            </Text>
+            <Text style={styles.linkTextPrimary}>Criar Conta</Text>
           </TouchableOpacity>
 
-          <Text style={styles.divider}>
-            |
-          </Text>
+          <Text style={styles.divider}>|</Text>
 
           <TouchableOpacity
             style={styles.linkButton}
             onPress={() => router.push('/forgot-password')}
             disabled={loading}
           >
-            <Text style={styles.linkTextSecondary}>
-              Esqueci a senha
-            </Text>
+            <Text style={styles.linkTextSecondary}>Esqueci a senha</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -198,212 +171,135 @@ export default function LoginScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#020617',
+    backgroundColor: THEME.bg,
     justifyContent: 'center',
     alignItems: 'center',
     padding: 24,
   },
-
-  topBackground: {
+  ambientGlow: {
     position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    height: '45%',
-    backgroundColor: '#042F2E',
-    borderBottomLeftRadius: 80,
-    borderBottomRightRadius: 80,
+    top: -100,
+    width: 300,
+    height: 300,
+    borderRadius: 150,
+    backgroundColor: THEME.primary,
+    opacity: 0.12,
   },
-
   loginCard: {
     width: '100%',
     maxWidth: 420,
-    padding: 32,
-    borderRadius: 28,
-
-    backgroundColor: '#07111F',
-
+    padding: 28,
+    borderRadius: 24,
+    backgroundColor: THEME.card,
     borderWidth: 1,
-    borderColor: '#00F5D4',
-
-    shadowColor: '#00F5D4',
-
-    shadowOffset: {
-      width: 0,
-      height: 0,
-    },
-
-    shadowOpacity: 0.35,
-    shadowRadius: 20,
-
-    elevation: 12,
+    borderColor: THEME.border,
+    elevation: 8,
   },
-
   logoContainer: {
     alignItems: 'center',
-    marginBottom: 32,
+    marginBottom: 24,
   },
-
-  logoIcon: {
-    fontSize: 52,
+  iconBadge: {
+    width: 64,
+    height: 64,
+    borderRadius: 20,
+    backgroundColor: 'rgba(0, 229, 195, 0.1)',
+    alignItems: 'center',
+    justifyContent: 'center',
     marginBottom: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(0, 229, 195, 0.2)',
   },
-
   brandName: {
-    fontSize: 30,
+    fontSize: 24,
     fontWeight: '900',
-    color: '#00F5D4',
-    letterSpacing: 3,
+    color: THEME.text,
+    letterSpacing: 2,
   },
-
   statusContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-
-    marginTop: 12,
-    marginBottom: 12,
-
-    backgroundColor: 'rgba(0, 245, 212, 0.12)',
-
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-
-    borderRadius: 25,
+    marginTop: 10,
+    marginBottom: 8,
+    backgroundColor: 'rgba(0, 229, 195, 0.08)',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
   },
-
   statusDot: {
-    width: 10,
-    height: 10,
-
-    borderRadius: 5,
-
-    backgroundColor: '#00F5D4',
-
-    marginRight: 8,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: THEME.accent,
+    marginRight: 6,
   },
-
   statusText: {
-    color: '#00F5D4',
+    color: THEME.accent,
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  subtitle: {
+    fontSize: 13,
+    color: THEME.textSoft,
+    textAlign: 'center',
+    marginTop: 6,
+  },
+  inputContainer: {
+    marginBottom: 16,
+  },
+  label: {
     fontSize: 12,
     fontWeight: '700',
-  },
-
-  subtitle: {
-    fontSize: 14,
-    color: '#CBD5E1',
-
-    textAlign: 'center',
-    lineHeight: 22,
-
-    marginTop: 8,
-  },
-
-  inputContainer: {
-    marginBottom: 18,
-  },
-
-  label: {
-    fontSize: 13,
-    fontWeight: '700',
-
-    color: '#00F5D4',
-
-    marginBottom: 8,
-
+    color: THEME.textSoft,
+    marginBottom: 6,
     textTransform: 'uppercase',
-    letterSpacing: 1,
+    letterSpacing: 0.8,
   },
-
   input: {
-    backgroundColor: '#020617',
-
-    borderWidth: 1.5,
-    borderColor: '#134E4A',
-
-    borderRadius: 16,
-
-    paddingHorizontal: 18,
-    paddingVertical: 16,
-
-    fontSize: 16,
-    color: '#FFFFFF',
-  },
-
-  button: {
-    backgroundColor: '#0F766E',
-
-    paddingVertical: 18,
-
-    borderRadius: 18,
-
-    alignItems: 'center',
-
-    marginTop: 18,
-
+    backgroundColor: THEME.inputBg,
     borderWidth: 1,
-    borderColor: '#14B8A6',
-
-    shadowColor: '#14B8A6',
-
-    shadowOffset: {
-      width: 0,
-      height: 4,
-    },
-
-    shadowOpacity: 0.2,
-    shadowRadius: 10,
-
-    elevation: 5,
+    borderColor: THEME.border,
+    borderRadius: 14,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    fontSize: 15,
+    color: THEME.text,
   },
-
-  buttonPressed: {
-    opacity: 0.85,
-
-    transform: [
-      {
-        scale: 0.97,
-      },
-    ],
+  buttonWrapper: {
+    borderRadius: 14,
+    overflow: 'hidden',
+    marginTop: 12,
   },
-
+  buttonGradient: {
+    paddingVertical: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   buttonText: {
     color: '#FFFFFF',
-
-    fontSize: 16,
-    fontWeight: '800',
-
-    letterSpacing: 0.5,
-  },
-
-  footerLinks: {
-    flexDirection: 'row',
-
-    justifyContent: 'center',
-    alignItems: 'center',
-
-    marginTop: 28,
-  },
-
-  linkButton: {
-    padding: 6,
-  },
-
-  linkTextPrimary: {
-    color: '#00F5D4',
-
     fontSize: 15,
     fontWeight: '700',
   },
-
+  footerLinks: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginTop: 20,
+  },
+  linkButton: {
+    padding: 6,
+  },
+  linkTextPrimary: {
+    color: THEME.accent,
+    fontSize: 14,
+    fontWeight: '700',
+  },
   linkTextSecondary: {
-    color: '#CBD5E1',
-
+    color: THEME.textMuted,
     fontSize: 14,
   },
-
   divider: {
-    color: '#334155',
-
-    marginHorizontal: 12,
+    color: THEME.border,
+    marginHorizontal: 10,
   },
 });

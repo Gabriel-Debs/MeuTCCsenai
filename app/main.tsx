@@ -26,9 +26,19 @@ import {
 } from 'react-native';
 
 const GEMINI_MODELS = ['gemini-3.6-flash', 'gemini-3.5-flash']; // principal, reserva
-const GEMINI_API_KEY = 'AQ.Ab8RN6IyiEJQMlyu8AYb2quM2ol4_sGow-8hP2C5oizMKJsvxQ'.trim();
+const GEMINI_API_KEY = 'AQ.Ab8RN6IndLRxrlz9LE4ZX4KLbucsSFNXL5sd77TZBq1THsPrdA'.trim();
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
- 
+
+// Mensagens dinâmicas de carregamento
+const LOADING_MESSAGES = [
+  'Analisando com IA...',
+  'Lendo o conteúdo do documento...',
+  'Identificando os pontos mais importantes...',
+  'Resumindo as informações para você...',
+  'Organizando os alertas e próximos passos...',
+  'Quase pronto...',
+];
+
 const THEME = {
   bg: '#070710',
   surface: '#0E0E1A',
@@ -97,7 +107,6 @@ function ResultCard({
   }, []);
 
   const handleCopy = async () => {
-    // await Clipboard.setStringAsync(text);
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     Alert.alert('Copiado!', `${title} copiado para a área de transferência.`);
   };
@@ -234,9 +243,9 @@ function LoadingDots() {
 }
  
 // ─── Helpers ──────────────────────────────────────────────────
-const MAX_FILE_MB = 15; // limite por arquivo
-const MAX_TOTAL_MB = 18; // limite prático para enviar inline ao Gemini (~20 MB no total da requisição)
-const MAX_FILES = 10; // máximo de arquivos por análise
+const MAX_FILE_MB = 15;
+const MAX_TOTAL_MB = 18;
+const MAX_FILES = 10;
 
 async function blobUriToBase64(uri: string): Promise<string> {
   const blob = await (await fetch(uri)).blob();
@@ -248,20 +257,17 @@ async function blobUriToBase64(uri: string): Promise<string> {
   });
 }
 
-// Lê um arquivo como base64 tentando vários métodos (o Android às vezes recusa o primeiro)
 async function uriToBase64(uri: string): Promise<string> {
   if (Platform.OS === 'web') return blobUriToBase64(uri);
 
   const errors: string[] = [];
 
-  // 1) API legada
   try {
     return await FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.Base64 });
   } catch (e: any) {
     errors.push(`legacy: ${e?.message}`);
   }
 
-  // 2) API nova do expo-file-system (SDK 54+)
   try {
     const { File } = require('expo-file-system');
     return await new File(uri).base64();
@@ -269,7 +275,6 @@ async function uriToBase64(uri: string): Promise<string> {
     errors.push(`File: ${e?.message}`);
   }
 
-  // 3) Copia para o cache do app e tenta ler de novo
   try {
     const copy = `${FileSystem.cacheDirectory}upload-${Date.now()}`;
     await FileSystem.copyAsync({ from: uri, to: copy });
@@ -278,7 +283,6 @@ async function uriToBase64(uri: string): Promise<string> {
     errors.push(`copy: ${e?.message}`);
   }
 
-  // 4) fetch + FileReader
   try {
     return await blobUriToBase64(uri);
   } catch (e: any) {
@@ -296,7 +300,6 @@ const escapeHtml = (str: string) =>
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
 
-// Converte o texto da IA (com possíveis **negritos** e listas "* item" / "- item") em HTML seguro
 function textToHtml(text: string): string {
   const lines = escapeHtml(text).split(/\r?\n/);
   let html = '';
@@ -383,6 +386,7 @@ export default function App() {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [pageWidth, setPageWidth] = useState(0);
   const [loading, setLoading] = useState(false);
+  const [loadingMessageIndex, setLoadingMessageIndex] = useState(0);
   const [summary, setSummary] = useState('');
   const [attention, setAttention] = useState('');
   const [nextStep, setNextStep] = useState('');
@@ -397,8 +401,21 @@ export default function App() {
       Animated.spring(headerY, { toValue: 0, tension: 80, friction: 12, useNativeDriver: true }),
     ]).start();
   }, []);
+
+  // Efeito que alterna as mensagens de carregamento enquanto loading for true
+  useEffect(() => {
+    let interval: NodeJS.Timeout;
+    if (loading) {
+      setLoadingMessageIndex(0);
+      interval = setInterval(() => {
+        setLoadingMessageIndex((prev) => (prev + 1) % LOADING_MESSAGES.length);
+      }, 2500); // Troca a mensagem a cada 2.5 segundos
+    }
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [loading]);
  
-  // Adiciona arquivos à lista (sem analisar automaticamente, para o usuário poder juntar várias imagens)
   const addFiles = (newFiles: FileType[]) => {
     if (!newFiles.length) return;
     const current = selectedFiles;
@@ -558,7 +575,7 @@ PRÓXIMO PASSO:
       outer: for (const model of GEMINI_MODELS) {
         for (let attempt = 0; attempt < 3; attempt++) {
           const controller = new AbortController();
-          const timer = setTimeout(() => controller.abort(), 45000); // limite de 45s por tentativa
+          const timer = setTimeout(() => controller.abort(), 45000);
           try {
             console.log(`[Gemini] ${model} - tentativa ${attempt + 1}`);
             response = await fetch(
@@ -580,9 +597,9 @@ PRÓXIMO PASSO:
             clearTimeout(timer);
           }
 
-          if (response?.ok) break outer; // deu certo
-          if (response && response.status !== 503 && response.status !== 429) break outer; // erro que não adianta repetir
-          await new Promise((r) => setTimeout(r, 1500 * (attempt + 1))); // espera 1.5s, 3s, 4.5s
+          if (response?.ok) break outer;
+          if (response && response.status !== 503 && response.status !== 429) break outer;
+          await new Promise((r) => setTimeout(r, 1500 * (attempt + 1)));
         }
       }
 
@@ -644,16 +661,13 @@ PRÓXIMO PASSO:
         fileNames: selectedFiles.map((f) => f.name),
       });
 
-      // Web: abre a janela de impressão, onde o usuário escolhe "Salvar como PDF"
       if (Platform.OS === 'web') {
         await Print.printAsync({ html });
         return;
       }
 
-      // Celular: gera o arquivo PDF e abre o menu de compartilhar/salvar
       const { uri } = await Print.printToFileAsync({ html, base64: false });
 
-      // Dá um nome amigável ao arquivo
       const stamp = new Date().toISOString().slice(0, 10);
       const target = `${FileSystem.cacheDirectory}Desburocrata-relatorio-${stamp}.pdf`;
       let finalUri = uri;
@@ -661,9 +675,7 @@ PRÓXIMO PASSO:
         await FileSystem.deleteAsync(target, { idempotent: true });
         await FileSystem.moveAsync({ from: uri, to: target });
         finalUri = target;
-      } catch {
-        // se renomear falhar, usa o arquivo original mesmo
-      }
+      } catch {}
 
       if (!(await Sharing.isAvailableAsync())) {
         return Alert.alert('PDF gerado', `Arquivo salvo em:\n${finalUri}`);
@@ -702,7 +714,7 @@ PRÓXIMO PASSO:
         </View>
       </Animated.View>
 
-      <ScrollView contentContainerStyle={styles.scrollContent}   showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
         <View style={styles.viewfinderCard}>
           <View style={styles.viewfinderTouchable}>
             
@@ -843,12 +855,14 @@ PRÓXIMO PASSO:
           </Text>
         )}
 
-        {/* ── Loading ── */}
+        {/* ── Loading com Mensagens Dinâmicas ── */}
         {loading && (
           <View style={styles.loadingContainer}>
             <View style={styles.loadingInner}>
               <ActivityIndicator size="small" color={THEME.accent} />
-              <Text style={styles.loadingText}>Analisando com IA</Text>
+              <Text style={styles.loadingText}>
+                {LOADING_MESSAGES[loadingMessageIndex]}
+              </Text>
             </View>
             <LoadingDots />
           </View>
@@ -889,7 +903,8 @@ PRÓXIMO PASSO:
               text={nextStep}
               delay={200}
             />
- 
+
+            {/* ── Botão Baixar PDF ── */}
             <TouchableOpacity
               style={[styles.resetButton, exportingPdf && { opacity: 0.6 }]}
               onPress={downloadPdf}
@@ -1025,7 +1040,7 @@ const styles = StyleSheet.create({
   previewContent: {
     flex: 1,
     width: '100%',
-    paddingBottom: 88, // Desvincula o cálculo do topo da barra inferior fixa
+    paddingBottom: 88,
     justifyContent: 'center',
     alignItems: 'center',
   },

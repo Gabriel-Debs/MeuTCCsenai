@@ -1,3 +1,5 @@
+import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import { Stack, useRouter } from 'expo-router';
 import React, { useState } from 'react';
 import {
@@ -14,8 +16,20 @@ import {
   View,
 } from 'react-native';
 
-// Import da instância do Supabase
 import { supabase } from '../lib/supabase';
+
+const THEME = {
+  bg: '#070710',
+  card: '#12121F',
+  primary: '#7B6EF6',
+  primaryDark: '#5B4FE8',
+  accent: '#00E5C3',
+  text: '#F1F1F6',
+  textSoft: '#C0C0D0',
+  textMuted: '#6B6B80',
+  border: 'rgba(255,255,255,0.08)',
+  inputBg: '#090911',
+};
 
 export default function ResetPasswordScreen() {
   const router = useRouter();
@@ -24,7 +38,6 @@ export default function ResetPasswordScreen() {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [loading, setLoading] = useState(false);
 
-  // Helper para alertas funcionarem na Web e no Celular
   const showAlert = (title: string, message: string, onPress?: () => void) => {
     if (Platform.OS === 'web') {
       window.alert(`${title}: ${message}`);
@@ -35,14 +48,8 @@ export default function ResetPasswordScreen() {
   };
 
   const handleUpdatePassword = async () => {
-    // 1. Validações locais
-    if (!password.trim()) {
-      showAlert('Atenção', 'Digite sua nova senha.');
-      return;
-    }
-
-    if (password.length < 6) {
-      showAlert('Atenção', 'A senha deve ter pelo menos 6 caracteres.');
+    if (!password.trim() || password.length < 6) {
+      showAlert('Atenção', 'A senha deve possuir pelo menos 6 caracteres.');
       return;
     }
 
@@ -52,12 +59,7 @@ export default function ResetPasswordScreen() {
     }
 
     setLoading(true);
-
-    // 2. Atualização da senha no Supabase
-    const { error } = await supabase.auth.updateUser({
-      password: password,
-    });
-
+    const { error } = await supabase.auth.updateUser({ password });
     setLoading(false);
 
     if (error) {
@@ -65,12 +67,7 @@ export default function ResetPasswordScreen() {
       return;
     }
 
-    // 3. Sucesso e redirecionamento para o login
-    showAlert(
-      'Senha alterada!',
-      'Sua senha foi redefinida com sucesso. Faça login com a nova senha.',
-      () => router.replace('/')
-    );
+    showAlert('Senha alterada!', 'Sua senha foi redefinida com sucesso.', () => router.replace('/'));
   };
 
   return (
@@ -80,19 +77,17 @@ export default function ResetPasswordScreen() {
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         style={styles.container}
       >
-        <StatusBar barStyle="light-content" backgroundColor="#020617" />
-
-        <View style={styles.topBackground} />
+        <StatusBar barStyle="light-content" backgroundColor={THEME.bg} />
 
         <View style={styles.card}>
           <View style={styles.headerContainer}>
-            <Text style={styles.icon}>🔒</Text>
+            <View style={styles.iconBadge}>
+              <Ionicons name="lock-closed-outline" size={30} color={THEME.accent} />
+            </View>
 
             <Text style={styles.title}>NOVA SENHA</Text>
 
-            <Text style={styles.subtitle}>
-              Crie uma nova senha para acessar sua conta no Desburocrata.
-            </Text>
+            <Text style={styles.subtitle}>Crie uma nova senha para acessar sua conta.</Text>
           </View>
 
           <View style={styles.inputContainer}>
@@ -100,7 +95,7 @@ export default function ResetPasswordScreen() {
             <TextInput
               style={styles.input}
               placeholder="Digite a nova senha"
-              placeholderTextColor="#64748B"
+              placeholderTextColor={THEME.textMuted}
               secureTextEntry
               value={password}
               onChangeText={setPassword}
@@ -113,7 +108,7 @@ export default function ResetPasswordScreen() {
             <TextInput
               style={styles.input}
               placeholder="Repita a nova senha"
-              placeholderTextColor="#64748B"
+              placeholderTextColor={THEME.textMuted}
               secureTextEntry
               value={confirmPassword}
               onChangeText={setConfirmPassword}
@@ -121,34 +116,22 @@ export default function ResetPasswordScreen() {
             />
           </View>
 
-          <Pressable
-            onPress={handleUpdatePassword}
-            disabled={loading}
-            style={({ pressed, hovered }) => [
-              styles.button,
-              {
-                transform: [
-                  {
-                    scale: pressed ? 0.96 : hovered ? 1.03 : 1,
-                  },
-                ],
-                shadowOpacity: hovered ? 0.45 : 0.2,
-              },
-              loading && { opacity: 0.7 },
-            ]}
-          >
-            {loading ? (
-              <ActivityIndicator color="#FFFFFF" />
-            ) : (
-              <Text style={styles.buttonText}>Redefinir Senha</Text>
-            )}
+          <Pressable onPress={handleUpdatePassword} disabled={loading} style={styles.buttonWrapper}>
+            <LinearGradient
+              colors={[THEME.primary, THEME.primaryDark]}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 0 }}
+              style={styles.buttonGradient}
+            >
+              {loading ? (
+                <ActivityIndicator color="#FFFFFF" />
+              ) : (
+                <Text style={styles.buttonText}>Redefinir Senha</Text>
+              )}
+            </LinearGradient>
           </Pressable>
 
-          <TouchableOpacity
-            style={styles.backButton}
-            onPress={() => router.replace('/')}
-            disabled={loading}
-          >
+          <TouchableOpacity style={styles.backButton} onPress={() => router.replace('/')} disabled={loading}>
             <Text style={styles.backButtonText}>← Cancelar e Ir ao Login</Text>
           </TouchableOpacity>
         </View>
@@ -160,129 +143,90 @@ export default function ResetPasswordScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#020617',
+    backgroundColor: THEME.bg,
     justifyContent: 'center',
     alignItems: 'center',
     padding: 24,
   },
-
-  topBackground: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    height: '45%',
-    backgroundColor: '#042F2E',
-    borderBottomLeftRadius: 80,
-    borderBottomRightRadius: 80,
-  },
-
   card: {
-    backgroundColor: '#07111f',
+    backgroundColor: THEME.card,
     width: '100%',
     maxWidth: 420,
-    padding: 32,
-    borderRadius: 28,
-
+    padding: 28,
+    borderRadius: 24,
     borderWidth: 1,
-    borderColor: '#00F5D4',
-
-    shadowColor: '#00F5D4',
-    shadowOffset: {
-      width: 0,
-      height: 0,
-    },
-    shadowOpacity: 0.35,
-    shadowRadius: 20,
-    elevation: 12,
+    borderColor: THEME.border,
   },
-
   headerContainer: {
     alignItems: 'center',
-    marginBottom: 28,
+    marginBottom: 24,
   },
-
-  icon: {
-    fontSize: 52,
-    marginBottom: 12,
-  },
-
-  title: {
-    fontSize: 22,
-    fontWeight: '900',
-    color: '#00F5D4',
-    letterSpacing: 2,
-    textAlign: 'center',
-  },
-
-  subtitle: {
-    fontSize: 14,
-    color: '#CBD5E1',
-    textAlign: 'center',
-    lineHeight: 22,
-    marginTop: 12,
-  },
-
-  inputContainer: {
-    marginBottom: 18,
-  },
-
-  label: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: '#00F5D4',
-    marginBottom: 8,
-    textTransform: 'uppercase',
-    letterSpacing: 1,
-  },
-
-  input: {
-    backgroundColor: '#020617',
-    borderWidth: 1.5,
-    borderColor: '#134E4A',
-    borderRadius: 16,
-    paddingHorizontal: 18,
-    paddingVertical: 16,
-    fontSize: 16,
-    color: '#FFFFFF',
-  },
-
-  button: {
-    backgroundColor: '#0F766E',
-    paddingVertical: 18,
+  iconBadge: {
+    width: 60,
+    height: 60,
     borderRadius: 18,
+    backgroundColor: 'rgba(0, 229, 195, 0.1)',
     alignItems: 'center',
-    marginTop: 10,
-
+    justifyContent: 'center',
+    marginBottom: 12,
     borderWidth: 1,
-    borderColor: '#14B8A6',
-
-    shadowColor: '#14B8A6',
-    shadowOffset: {
-      width: 0,
-      height: 4,
-    },
-    shadowOpacity: 0.2,
-    shadowRadius: 10,
-
-    elevation: 5,
+    borderColor: 'rgba(0, 229, 195, 0.2)',
   },
-
+  title: {
+    fontSize: 20,
+    fontWeight: '800',
+    color: THEME.text,
+    letterSpacing: 1,
+    textAlign: 'center',
+  },
+  subtitle: {
+    fontSize: 13,
+    color: THEME.textSoft,
+    textAlign: 'center',
+    marginTop: 6,
+  },
+  inputContainer: {
+    marginBottom: 16,
+  },
+  label: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: THEME.textSoft,
+    marginBottom: 6,
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+  },
+  input: {
+    backgroundColor: THEME.inputBg,
+    borderWidth: 1,
+    borderColor: THEME.border,
+    borderRadius: 14,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    fontSize: 15,
+    color: THEME.text,
+  },
+  buttonWrapper: {
+    borderRadius: 14,
+    overflow: 'hidden',
+    marginTop: 10,
+  },
+  buttonGradient: {
+    paddingVertical: 16,
+    alignItems: 'center',
+  },
   buttonText: {
     color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '800',
-    letterSpacing: 0.5,
+    fontSize: 15,
+    fontWeight: '700',
   },
-
   backButton: {
-    marginTop: 24,
+    marginTop: 20,
     alignItems: 'center',
-    padding: 8,
+    padding: 6,
   },
-
   backButtonText: {
-    color: '#00F5D4',
+    color: THEME.accent,
     fontSize: 14,
     fontWeight: '700',
   },
